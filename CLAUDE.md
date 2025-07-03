@@ -7,10 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is the **Obsidian Property Relation** plugin, designed to implement bidirectional property relationships similar to Notion's Relation database type. When a note references another note through a designated property, the plugin automatically creates the reverse relationship in the target note.
 
 ### Core Functionality
-- **Bidirectional Properties**: Configure properties (e.g., "related", "mentions", "links-to") that automatically sync between notes
-- **Automatic Synchronization**: When Note A adds Note B to a bidirectional property, Note B automatically gets Note A added to its corresponding property
+- **Property Pairs**: Configure pairs of properties that are bidirectionally linked (e.g., "wardrobe" ↔ "outfits")
+- **Automatic Synchronization**: When Note A adds Note B to Property A, Note B automatically gets Note A added to Property B
 - **Real-time Updates**: Changes are applied immediately when properties are modified
-- **Configurable Properties**: Users can define which properties should be bidirectional through settings
+- **Multiple Property Pairs**: Support unlimited property pair configurations through settings UI
 
 ## Development Commands
 
@@ -39,8 +39,8 @@ This is an Obsidian plugin built with TypeScript and bundled using esbuild, desi
 - **ConflictResolver**: Handles edge cases like circular references and deletion
 
 #### Configuration System
-- **SettingsInterface**: UI for configuring which properties are bidirectional
-- **PropertyRegistry**: Maintains list of active bidirectional properties
+- **SettingsInterface**: UI for configuring property pairs with add/remove functionality
+- **PropertyPairRegistry**: Maintains list of active property pairs
 - **SettingsStorage**: Persistent storage of plugin configuration
 
 #### File System Integration
@@ -71,18 +71,35 @@ The project currently contains:
 ## Implementation Details
 
 ### Property Detection Logic
-Properties are identified as bidirectional through:
-1. User configuration in settings (e.g., "related", "mentions", "connected-to")
+Property pairs are identified and synchronized through:
+1. User configuration in settings as property pairs (e.g., "wardrobe" ↔ "outfits")
 2. Frontmatter parsing using regex patterns to extract `[[Note Name]]` wikilink references
+3. Bidirectional mapping where Property A on one note corresponds to Property B on linked notes
 
 ### Synchronization Workflow
 1. **Detection**: FileWatcher detects property changes in frontmatter
-2. **Parsing**: PropertyParser extracts note references from modified properties
-3. **Validation**: Ensure target notes exist and properties are configured as bidirectional
-4. **Update**: PropertyUpdater modifies target note's frontmatter to add reverse relationship
-5. **Conflict Resolution**: Handle cases where relationships already exist or create cycles
+2. **Pair Lookup**: Check if modified property is part of any configured property pair
+3. **Parsing**: PropertyParser extracts note references from modified properties
+4. **Validation**: Ensure target notes exist and property pair is configured
+5. **Update**: PropertyUpdater modifies target note's frontmatter to add corresponding property relationship
+6. **Conflict Resolution**: Handle cases where relationships already exist or create cycles
 
-### Example Use Case
+### Example Use Cases
+
+#### Example 1: Wardrobe ↔ Outfits Relationship
+```yaml
+# Note A: "Summer Wardrobe"
+---
+outfits: "[[Beach Outfit]]"
+---
+
+# Note B: "Beach Outfit" (automatically updated)
+---
+wardrobe: "[[Summer Wardrobe]]"
+---
+```
+
+#### Example 2: Traditional Same-Property Relationship
 ```yaml
 # Note A: "Project Alpha"
 ---
@@ -92,6 +109,19 @@ related: "[[Project Beta]]"
 # Note B: "Project Beta" (automatically updated)
 ---
 related: "[[Project Alpha]]"
+---
+```
+
+#### Example 3: Project ↔ Tasks Relationship
+```yaml
+# Note A: "Website Redesign"
+---
+tasks: ["[[Design Mockups]]", "[[Frontend Development]]"]
+---
+
+# Note B: "Design Mockups" (automatically updated)
+---
+project: "[[Website Redesign]]"
 ---
 ```
 

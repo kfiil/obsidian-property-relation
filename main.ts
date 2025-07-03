@@ -1,11 +1,19 @@
 import { Plugin, TFile, MetadataCache, Vault, Notice } from 'obsidian';
 
+interface PropertyPair {
+	propertyA: string;
+	propertyB: string;
+}
+
 interface PropertyRelationSettings {
-	bidirectionalProperties: string[];
+	propertyPairs: PropertyPair[];
 }
 
 const DEFAULT_SETTINGS: PropertyRelationSettings = {
-	bidirectionalProperties: ['related', 'mentions', 'connected-to']
+	propertyPairs: [
+		{ propertyA: 'related', propertyB: 'related' },
+		{ propertyA: 'wardrobe', propertyB: 'outfits' }
+	]
 };
 
 export default class PropertyRelationPlugin extends Plugin {
@@ -65,17 +73,24 @@ export default class PropertyRelationPlugin extends Plugin {
 
 		const frontmatter = metadata.frontmatter;
 
-		// Check each configured bidirectional property
-		for (const propertyName of this.settings.bidirectionalProperties) {
-			const propertyValue = frontmatter[propertyName];
-			if (!propertyValue) continue;
+		// Check each configured property pair
+		for (const pair of this.settings.propertyPairs) {
+			// Check if this file has propertyA and sync to propertyB
+			const propertyAValue = frontmatter[pair.propertyA];
+			if (propertyAValue) {
+				const linkedNotes = this.extractWikilinks(propertyAValue);
+				for (const linkedNoteName of linkedNotes) {
+					await this.updateTargetNote(sourceFile, linkedNoteName, pair.propertyA, pair.propertyB);
+				}
+			}
 
-			// Extract note names from wikilinks
-			const linkedNotes = this.extractWikilinks(propertyValue);
-
-			// Update each linked note
-			for (const linkedNoteName of linkedNotes) {
-				await this.updateTargetNote(sourceFile, linkedNoteName, propertyName);
+			// Check if this file has propertyB and sync to propertyA
+			const propertyBValue = frontmatter[pair.propertyB];
+			if (propertyBValue) {
+				const linkedNotes = this.extractWikilinks(propertyBValue);
+				for (const linkedNoteName of linkedNotes) {
+					await this.updateTargetNote(sourceFile, linkedNoteName, pair.propertyB, pair.propertyA);
+				}
 			}
 		}
 	}
@@ -103,7 +118,7 @@ export default class PropertyRelationPlugin extends Plugin {
 		return wikilinks;
 	}
 
-	private async updateTargetNote(sourceFile: TFile, targetNoteName: string, propertyName: string) {
+	private async updateTargetNote(sourceFile: TFile, targetNoteName: string, sourceProperty: string, targetProperty: string) {
 		// Find the target file
 		const targetFile = this.app.vault.getAbstractFileByPath(`${targetNoteName}.md`);
 		if (!(targetFile instanceof TFile)) {
@@ -114,7 +129,7 @@ export default class PropertyRelationPlugin extends Plugin {
 				console.log(`Target note not found: ${targetNoteName}`);
 				return;
 			}
-			return this.updateTargetNote(sourceFile, found.basename, propertyName);
+			return this.updateTargetNote(sourceFile, found.basename, sourceProperty, targetProperty);
 		}
 
 		// Prevent processing the same file to avoid loops
@@ -129,7 +144,7 @@ export default class PropertyRelationPlugin extends Plugin {
 			const newContent = await this.addBidirectionalReference(
 				content,
 				sourceFile.basename,
-				propertyName
+				targetProperty
 			);
 
 			if (newContent !== content) {
@@ -168,11 +183,19 @@ export default class PropertyRelationPlugin extends Plugin {
 						if (!existingValue.includes(sourceReference)) {
 							// Add to existing value
 							if (existingValue.startsWith('[') && existingValue.endsWith(']')) {
-								// Array format
-								const newValue = existingValue.slice(0, -1) + `, "${sourceReference}"]`;
-								newLines.push(`${propertyName}: ${newValue}`);
+								// Array format - parse existing array properly
+								const arrayContent = existingValue.slice(1, -1).trim();
+								if (arrayContent) {
+									// Non-empty array, add with comma
+									const newValue = `[${arrayContent}, "${sourceReference}"]`;
+									newLines.push(`${propertyName}: ${newValue}`);
+								} else {
+									// Empty array
+									const newValue = `["${sourceReference}"]`;
+									newLines.push(`${propertyName}: ${newValue}`);
+								}
 							} else {
-								// Convert to array format
+								// Convert single value to array format
 								newLines.push(`${propertyName}: ["${existingValue}", "${sourceReference}"]`);
 							}
 						} else {
@@ -219,18 +242,64 @@ class PropertyRelationSettingTab extends PluginSettingTab {
 
 		containerEl.createEl('h2', { text: 'Property Relation Settings' });
 
+		containerEl.createEl('p', { 
+			text: 'Configure property pairs for bidirectional synchronization. When Note A has Property A linking to Note B, Note B will automatically get Property B linking back to Note A.' 
+		});
+
+		// Display existing pairs
+		this.plugin.settings.propertyPairs.forEach((pair, index) => {
+			const pairContainer = containerEl.createDiv('property-pair-container');
+			pairContainer.style.marginBottom = '15px';
+			pairContainer.style.padding = '10px';
+			pairContainer.style.border = '1px solid var(--background-modifier-border)';
+			pairContainer.style.borderRadius = '5px';
+
+			new Setting(pairContainer)
+				.setName(`Property Pair ${index + 1}`)
+				.setDesc('Two properties that will be synchronized bidirectionally')
+				.addText(text => text
+					.setPlaceholder('Property A')
+					.setValue(pair.propertyA)
+					.onChange(async (value) => {
+						this.plugin.settings.propertyPairs[index].propertyA = value.trim();
+						await this.plugin.saveSettings();
+					}))
+				.addText(text => text
+					.setPlaceholder('Property B')
+					.setValue(pair.propertyB)
+					.onChange(async (value) => {
+						this.plugin.settings.propertyPairs[index].propertyB = value.trim();
+						await this.plugin.saveSettings();
+					}))
+				.addButton(button => button
+					.setButtonText('Remove')
+					.setCta()
+					.onClick(async () => {
+						this.plugin.settings.propertyPairs.splice(index, 1);
+						await this.plugin.saveSettings();
+						this.display(); // Refresh the display
+					}));
+		});
+
+		// Add new pair button
 		new Setting(containerEl)
-			.setName('Bidirectional Properties')
-			.setDesc('Comma-separated list of property names that should be bidirectional')
-			.addTextArea(text => text
-				.setPlaceholder('related, mentions, connected-to')
-				.setValue(this.plugin.settings.bidirectionalProperties.join(', '))
-				.onChange(async (value) => {
-					this.plugin.settings.bidirectionalProperties = value
-						.split(',')
-						.map(s => s.trim())
-						.filter(s => s.length > 0);
+			.setName('Add Property Pair')
+			.setDesc('Add a new bidirectional property pair')
+			.addButton(button => button
+				.setButtonText('Add Pair')
+				.setCta()
+				.onClick(async () => {
+					this.plugin.settings.propertyPairs.push({ propertyA: '', propertyB: '' });
 					await this.plugin.saveSettings();
+					this.display(); // Refresh the display
 				}));
+
+		// Examples section
+		const examplesEl = containerEl.createDiv();
+		examplesEl.style.marginTop = '20px';
+		examplesEl.createEl('h3', { text: 'Examples' });
+		examplesEl.createEl('p', { text: '• wardrobe ↔ outfits: Notes with wardrobe property link to notes with outfits property' });
+		examplesEl.createEl('p', { text: '• related ↔ related: Traditional bidirectional linking with same property name' });
+		examplesEl.createEl('p', { text: '• project ↔ tasks: Project notes link to task notes and vice versa' });
 	}
 }
