@@ -1,0 +1,11 @@
+{
+	"id": "obsidian-property-relation",
+	"name": "Property Relation",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Create bidirectional property relationships between notes, similar to Notion's Relation database type",
+	"author": "Kenneth Fiil",
+	"authorUrl": "https://github.com/kfiil",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
