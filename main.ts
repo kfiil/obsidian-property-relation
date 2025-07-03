@@ -1,13 +1,7 @@
 import { Plugin, TFile, MetadataCache, Vault, Notice } from 'obsidian';
-
-interface PropertyPair {
-	propertyA: string;
-	propertyB: string;
-}
-
-interface PropertyRelationSettings {
-	propertyPairs: PropertyPair[];
-}
+import { PropertyPair, PropertyRelationSettings } from './src/types';
+import { extractWikilinks } from './src/wikilink-extractor';
+import { addBidirectionalReference, removeBidirectionalReference } from './src/frontmatter-modifier';
 
 const DEFAULT_SETTINGS: PropertyRelationSettings = {
 	propertyPairs: [
@@ -19,9 +13,19 @@ const DEFAULT_SETTINGS: PropertyRelationSettings = {
 export default class PropertyRelationPlugin extends Plugin {
 	settings: PropertyRelationSettings;
 	private processingFiles = new Set<string>();
+	private previousStates = new Map<string, Record<string, any>>();
 
 	async onload() {
 		await this.loadSettings();
+
+		// Initialize previous states for all existing files
+		const markdownFiles = this.app.vault.getMarkdownFiles();
+		for (const file of markdownFiles) {
+			const metadata = this.app.metadataCache.getFileCache(file);
+			if (metadata?.frontmatter) {
+				this.previousStates.set(file.path, { ...metadata.frontmatter });
+			}
+		}
 
 		// Register event listeners for file changes
 		this.registerEvent(
@@ -72,51 +76,57 @@ export default class PropertyRelationPlugin extends Plugin {
 		if (!metadata?.frontmatter) return;
 
 		const frontmatter = metadata.frontmatter;
+		const filePath = sourceFile.path;
+		const previousState = this.previousStates.get(filePath) || {};
 
 		// Check each configured property pair
 		for (const pair of this.settings.propertyPairs) {
-			// Check if this file has propertyA and sync to propertyB
-			const propertyAValue = frontmatter[pair.propertyA];
-			if (propertyAValue) {
-				const linkedNotes = this.extractWikilinks(propertyAValue);
-				for (const linkedNoteName of linkedNotes) {
-					await this.updateTargetNote(sourceFile, linkedNoteName, pair.propertyA, pair.propertyB);
-				}
-			}
+			// Handle propertyA changes
+			await this.handlePropertyChanges(
+				sourceFile, 
+				pair.propertyA, 
+				pair.propertyB, 
+				frontmatter[pair.propertyA], 
+				previousState[pair.propertyA]
+			);
 
-			// Check if this file has propertyB and sync to propertyA
-			const propertyBValue = frontmatter[pair.propertyB];
-			if (propertyBValue) {
-				const linkedNotes = this.extractWikilinks(propertyBValue);
-				for (const linkedNoteName of linkedNotes) {
-					await this.updateTargetNote(sourceFile, linkedNoteName, pair.propertyB, pair.propertyA);
-				}
-			}
+			// Handle propertyB changes
+			await this.handlePropertyChanges(
+				sourceFile, 
+				pair.propertyB, 
+				pair.propertyA, 
+				frontmatter[pair.propertyB], 
+				previousState[pair.propertyB]
+			);
+		}
+
+		// Store current state for next comparison
+		this.previousStates.set(filePath, { ...frontmatter });
+	}
+
+	private async handlePropertyChanges(
+		sourceFile: TFile,
+		sourceProperty: string,
+		targetProperty: string,
+		currentValue: any,
+		previousValue: any
+	) {
+		const currentLinks = extractWikilinks(currentValue);
+		const previousLinks = extractWikilinks(previousValue);
+
+		// Find added links
+		const addedLinks = currentLinks.filter(link => !previousLinks.includes(link));
+		for (const linkedNoteName of addedLinks) {
+			await this.updateTargetNote(sourceFile, linkedNoteName, sourceProperty, targetProperty);
+		}
+
+		// Find removed links
+		const removedLinks = previousLinks.filter(link => !currentLinks.includes(link));
+		for (const linkedNoteName of removedLinks) {
+			await this.removeFromTargetNote(sourceFile, linkedNoteName, sourceProperty, targetProperty);
 		}
 	}
 
-	private extractWikilinks(value: any): string[] {
-		if (!value) return [];
-
-		// Handle both string and array values
-		const values = Array.isArray(value) ? value : [value];
-		const wikilinks: string[] = [];
-
-		for (const val of values) {
-			if (typeof val === 'string') {
-				// Extract note names from [[Note Name]] format
-				const matches = val.match(/\[\[([^\]]+)\]\]/g);
-				if (matches) {
-					for (const match of matches) {
-						const noteName = match.slice(2, -2); // Remove [[ and ]]
-						wikilinks.push(noteName);
-					}
-				}
-			}
-		}
-
-		return wikilinks;
-	}
 
 	private async updateTargetNote(sourceFile: TFile, targetNoteName: string, sourceProperty: string, targetProperty: string) {
 		// Find the target file
@@ -141,7 +151,7 @@ export default class PropertyRelationPlugin extends Plugin {
 			this.processingFiles.add(targetFile.path);
 
 			const content = await this.app.vault.read(targetFile);
-			const newContent = await this.addBidirectionalReference(
+			const newContent = addBidirectionalReference(
 				content,
 				sourceFile.basename,
 				targetProperty
@@ -155,74 +165,43 @@ export default class PropertyRelationPlugin extends Plugin {
 		}
 	}
 
-	private async addBidirectionalReference(
-		content: string,
-		sourceNoteName: string,
-		propertyName: string
-	): Promise<string> {
-		const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
-		const match = content.match(frontmatterRegex);
-
-		const sourceReference = `[[${sourceNoteName}]]`;
-
-		if (match) {
-			// Parse existing frontmatter
-			const frontmatterContent = match[1];
-			const lines = frontmatterContent.split('\n');
-			const newLines: string[] = [];
-			let propertyFound = false;
-
-			for (const line of lines) {
-				const trimmed = line.trim();
-				if (trimmed.startsWith(`${propertyName}:`)) {
-					propertyFound = true;
-					const existingValue = trimmed.substring(`${propertyName}:`.length).trim();
-					
-					if (existingValue) {
-						// Check if reference already exists
-						if (!existingValue.includes(sourceReference)) {
-							// Add to existing value
-							if (existingValue.startsWith('[') && existingValue.endsWith(']')) {
-								// Array format - parse existing array properly
-								const arrayContent = existingValue.slice(1, -1).trim();
-								if (arrayContent) {
-									// Non-empty array, add with comma
-									const newValue = `[${arrayContent}, "${sourceReference}"]`;
-									newLines.push(`${propertyName}: ${newValue}`);
-								} else {
-									// Empty array
-									const newValue = `["${sourceReference}"]`;
-									newLines.push(`${propertyName}: ${newValue}`);
-								}
-							} else {
-								// Convert single value to array format
-								newLines.push(`${propertyName}: ["${existingValue}", "${sourceReference}"]`);
-							}
-						} else {
-							newLines.push(line);
-						}
-					} else {
-						// Empty property, add reference
-						newLines.push(`${propertyName}: "${sourceReference}"`);
-					}
-				} else {
-					newLines.push(line);
-				}
+	private async removeFromTargetNote(sourceFile: TFile, targetNoteName: string, sourceProperty: string, targetProperty: string) {
+		// Find the target file
+		const targetFile = this.app.vault.getAbstractFileByPath(`${targetNoteName}.md`);
+		if (!(targetFile instanceof TFile)) {
+			// Try finding by name if direct path doesn't work
+			const files = this.app.vault.getMarkdownFiles();
+			const found = files.find(f => f.basename === targetNoteName);
+			if (!found) {
+				console.log(`Target note not found: ${targetNoteName}`);
+				return;
 			}
+			return this.removeFromTargetNote(sourceFile, found.basename, sourceProperty, targetProperty);
+		}
 
-			// Add property if not found
-			if (!propertyFound) {
-				newLines.push(`${propertyName}: "${sourceReference}"`);
+		// Prevent processing the same file to avoid loops
+		if (this.processingFiles.has(targetFile.path)) {
+			return;
+		}
+
+		try {
+			this.processingFiles.add(targetFile.path);
+
+			const content = await this.app.vault.read(targetFile);
+			const newContent = removeBidirectionalReference(
+				content,
+				sourceFile.basename,
+				targetProperty
+			);
+
+			if (newContent !== content) {
+				await this.app.vault.modify(targetFile, newContent);
 			}
-
-			const newFrontmatter = newLines.join('\n');
-			return content.replace(frontmatterRegex, `---\n${newFrontmatter}\n---\n`);
-		} else {
-			// No frontmatter exists, create it
-			const newFrontmatter = `---\n${propertyName}: "${sourceReference}"\n---\n`;
-			return newFrontmatter + content;
+		} finally {
+			this.processingFiles.delete(targetFile.path);
 		}
 	}
+
 }
 
 import { App, PluginSettingTab, Setting } from 'obsidian';
