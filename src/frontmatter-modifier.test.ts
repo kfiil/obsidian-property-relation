@@ -106,6 +106,19 @@ Some content`);
 		});
 
 		describe('edge cases', () => {
+			it('should not create duplicates when adding to property with mixed format', () => {
+				const content = `---
+Outfits: "[[Note B]]"
+---
+Some content`;
+				const result = addBidirectionalReference(content, 'Note B', 'Outfits');
+				
+				expect(result).toBe(`---
+Outfits: "[[Note B]]"
+---
+Some content`);
+			});
+
 			it('should handle property names with special characters', () => {
 				const content = `---
 some-property: "[[Other Note]]"

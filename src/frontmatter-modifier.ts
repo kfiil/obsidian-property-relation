@@ -1,4 +1,5 @@
 import { extractWikilinks } from './wikilink-extractor';
+import { preprocessYamlBlockArrays } from './yaml-preprocessor';
 
 export const addBidirectionalReference = (
 	content: string,
@@ -11,8 +12,8 @@ export const addBidirectionalReference = (
 	const sourceReference = `[[${sourceNoteName}]]`;
 
 	if (match) {
-		// Parse existing frontmatter
-		const frontmatterContent = match[1];
+		// Parse existing frontmatter - preprocess to handle block arrays
+		const frontmatterContent = preprocessYamlBlockArrays(match[1]);
 		const lines = frontmatterContent.split('\n');
 		const newLines: string[] = [];
 		let propertyFound = false;
@@ -91,8 +92,8 @@ export const removeBidirectionalReference = (
 	const sourceReference = `[[${sourceNoteName}]]`;
 
 	if (match) {
-		// Parse existing frontmatter
-		const frontmatterContent = match[1];
+		// Parse existing frontmatter - preprocess to handle block arrays
+		const frontmatterContent = preprocessYamlBlockArrays(match[1]);
 		const lines = frontmatterContent.split('\n');
 		const newLines: string[] = [];
 		let propertyModified = false;
