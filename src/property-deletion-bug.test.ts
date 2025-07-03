@@ -22,7 +22,7 @@ Content`);
 		expect(result).not.toContain('[[Winter Outfit]]');
 	});
 
-	it('should only remove the entire property when it becomes empty after removal', () => {
+	it('should keep property as empty array when it becomes empty after removal', () => {
 		const content = `---
 title: Test Note
 Outfits: "[[Only Outfit]]"
@@ -30,19 +30,20 @@ author: John
 ---
 Content`;
 
-		// Remove the only link - NOW the property should be removed
+		// Remove the only link - property should become empty array, not removed entirely
 		const result = removeBidirectionalReference(content, 'Only Outfit', 'Outfits');
 		
 		expect(result).toBe(`---
 title: Test Note
+Outfits: []
 author: John
 ---
 Content`);
 		
-		// Property should be completely gone
-		expect(result).not.toContain('Outfits:');
+		// Property should remain as empty array
+		expect(result).toContain('Outfits: []');
 		expect(result).not.toContain('[[Only Outfit]]');
-		// But other properties should remain
+		// Other properties should remain
 		expect(result).toContain('title: Test Note');
 		expect(result).toContain('author: John');
 	});
@@ -69,13 +70,14 @@ Outfits: ["[[Only Outfit]]"]
 ---
 Content`;
 
-		// Remove the single link from array - property should be removed
+		// Remove the single link from array - property should become empty array
 		const result = removeBidirectionalReference(content, 'Only Outfit', 'Outfits');
 		
 		expect(result).toBe(`---
+Outfits: []
 ---
 Content`);
-		expect(result).not.toContain('Outfits:');
+		expect(result).toContain('Outfits: []');
 	});
 
 	it('should convert array to single value when removing from 2-item array', () => {
@@ -103,15 +105,15 @@ Outfits: "[[Note B]]" - "[[Note B]]"
 ---
 Content`;
 
-		// Remove Note B - should remove the entire property since it becomes empty/invalid
+		// Remove Note B - should keep property as empty array since all wikilinks are removed
 		const result = removeBidirectionalReference(malformedContent, 'Note B', 'Outfits');
 		
-		// The property should be removed entirely because after removing all instances 
-		// of [[Note B]], the remaining value would be invalid/empty
+		// The property should become empty array after removing all instances of [[Note B]]
 		expect(result).toBe(`---
+Outfits: []
 ---
 Content`);
-		expect(result).not.toContain('Outfits:');
+		expect(result).toContain('Outfits: []');
 		expect(result).not.toContain('[[Note B]]');
 	});
 

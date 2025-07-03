@@ -115,8 +115,8 @@ export const removeBidirectionalReference = (
 							const filteredItems = items.filter(item => item !== sourceReference);
 							
 							if (filteredItems.length === 0) {
-								// Don't add the property line at all if array becomes empty
-								continue;
+								// Keep the property but make it an empty array
+								newLines.push(`${propertyName}: []`);
 							} else if (filteredItems.length === 1) {
 								// Convert back to single value if only one item remains
 								newLines.push(`${propertyName}: "${filteredItems[0]}"`);
@@ -126,8 +126,8 @@ export const removeBidirectionalReference = (
 								newLines.push(`${propertyName}: ${newArrayValue}`);
 							}
 						} else if (existingValue === `"${sourceReference}"` || existingValue === sourceReference) {
-							// Single value that matches exactly - remove property entirely
-							continue;
+							// Single value that matches exactly - keep property but make it empty array
+							newLines.push(`${propertyName}: []`);
 						} else {
 							// Handle malformed YAML or mixed content - remove all instances of the wikilink
 							const originalValue = existingValue;
@@ -144,10 +144,10 @@ export const removeBidirectionalReference = (
 								.replace(/\s*-\s*-\s*/g, ' ')  // Replace dash sequences with spaces
 								.replace(/^\s+|\s+$/g, '');  // Trim again
 							
-							// If the value becomes empty or contains only quotes/punctuation, remove property
+							// If the value becomes empty or contains only quotes/punctuation, make it empty array
 							if (!newValue || newValue.match(/^["'\s\-]*$/)) {
-								// Property becomes empty, remove it entirely
-								continue;
+								// Property becomes empty, keep it as empty array
+								newLines.push(`${propertyName}: []`);
 							} else {
 								// Keep the modified value
 								newLines.push(`${propertyName}: ${newValue}`);
