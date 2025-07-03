@@ -86,8 +86,9 @@ export const removeBidirectionalReference = (
 	sourceNoteName: string,
 	propertyName: string
 ): string => {
-	const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
-	const match = content.match(frontmatterRegex);
+	try {
+		const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
+		const match = content.match(frontmatterRegex);
 
 	const sourceReference = `[[${sourceNoteName}]]`;
 
@@ -177,4 +178,12 @@ export const removeBidirectionalReference = (
 	}
 
 	return content;
+	} catch (error) {
+		console.error('[PropertyRelation] Error in removeBidirectionalReference:', error);
+		console.error('[PropertyRelation] Content:', content);
+		console.error('[PropertyRelation] sourceNoteName:', sourceNoteName);
+		console.error('[PropertyRelation] propertyName:', propertyName);
+		// Return original content to prevent data loss
+		return content;
+	}
 };

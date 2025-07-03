@@ -188,6 +188,8 @@ export default class PropertyRelationPlugin extends Plugin {
 			this.processingFiles.add(targetFile.path);
 
 			const content = await this.app.vault.read(targetFile);
+			console.log(`[PropertyRelation] Removing "${sourceFile.basename}" from "${targetProperty}" in ${targetFile.path}`);
+			
 			const newContent = removeBidirectionalReference(
 				content,
 				sourceFile.basename,
@@ -195,8 +197,17 @@ export default class PropertyRelationPlugin extends Plugin {
 			);
 
 			if (newContent !== content) {
+				console.log(`[PropertyRelation] Content changed, updating ${targetFile.path}`);
 				await this.app.vault.modify(targetFile, newContent);
+			} else {
+				console.log(`[PropertyRelation] No changes needed for ${targetFile.path}`);
 			}
+		} catch (error) {
+			console.error(`[PropertyRelation] Error in removeFromTargetNote:`, error);
+			console.error(`[PropertyRelation] - sourceFile: ${sourceFile.path}`);
+			console.error(`[PropertyRelation] - targetFile: ${targetFile.path}`);
+			console.error(`[PropertyRelation] - sourceProperty: ${targetProperty}`);
+			new Notice(`Error removing property relation: ${error.message}`);
 		} finally {
 			this.processingFiles.delete(targetFile.path);
 		}
