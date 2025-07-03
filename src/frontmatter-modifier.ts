@@ -129,8 +129,29 @@ export const removeBidirectionalReference = (
 							// Single value that matches exactly - remove property entirely
 							continue;
 						} else {
-							// Single value that doesn't match - keep as is
-							newLines.push(line);
+							// Handle malformed YAML or mixed content - remove all instances of the wikilink
+							const originalValue = existingValue;
+							let newValue = existingValue;
+							
+							// Remove all instances of the wikilink (with and without quotes)
+							newValue = newValue.replace(new RegExp(`"?\\[\\[${sourceNoteName}\\]\\]"?`, 'g'), '');
+							
+							// Clean up the result
+							newValue = newValue
+								.replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+								.replace(/^\s+|\s+$/g, '')  // Trim leading/trailing spaces
+								.replace(/^-\s*|-\s*$/g, '')  // Remove leading/trailing dashes
+								.replace(/\s*-\s*-\s*/g, ' ')  // Replace dash sequences with spaces
+								.replace(/^\s+|\s+$/g, '');  // Trim again
+							
+							// If the value becomes empty or contains only quotes/punctuation, remove property
+							if (!newValue || newValue.match(/^["'\s\-]*$/)) {
+								// Property becomes empty, remove it entirely
+								continue;
+							} else {
+								// Keep the modified value
+								newLines.push(`${propertyName}: ${newValue}`);
+							}
 						}
 					} else {
 						// Value doesn't contain the reference - keep as is
