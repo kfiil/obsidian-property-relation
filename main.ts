@@ -130,8 +130,12 @@ export default class PropertyRelationPlugin extends Plugin {
 
 	private async updateTargetNote(sourceFile: TFile, targetNoteName: string, sourceProperty: string, targetProperty: string) {
 		// Find the target file
-		const targetFile = this.app.vault.getAbstractFileByPath(`${targetNoteName}.md`);
-		if (!(targetFile instanceof TFile)) {
+		let targetFile: TFile | null = null;
+		const abstractFile = this.app.vault.getAbstractFileByPath(`${targetNoteName}.md`);
+		
+		if (abstractFile instanceof TFile) {
+			targetFile = abstractFile;
+		} else {
 			// Try finding by name if direct path doesn't work
 			const files = this.app.vault.getMarkdownFiles();
 			const found = files.find(f => f.basename === targetNoteName);
@@ -139,7 +143,14 @@ export default class PropertyRelationPlugin extends Plugin {
 				console.log(`Target note not found: ${targetNoteName}`);
 				return;
 			}
-			return this.updateTargetNote(sourceFile, found.basename, sourceProperty, targetProperty);
+			// Use the found file directly instead of recursing
+			targetFile = found;
+		}
+
+		// Safety check (should never happen due to logic above)
+		if (!targetFile) {
+			console.log(`Target file is null: ${targetNoteName}`);
+			return;
 		}
 
 		// Prevent processing the same file to avoid loops
@@ -167,8 +178,12 @@ export default class PropertyRelationPlugin extends Plugin {
 
 	private async removeFromTargetNote(sourceFile: TFile, targetNoteName: string, sourceProperty: string, targetProperty: string) {
 		// Find the target file
-		const targetFile = this.app.vault.getAbstractFileByPath(`${targetNoteName}.md`);
-		if (!(targetFile instanceof TFile)) {
+		let targetFile: TFile | null = null;
+		const abstractFile = this.app.vault.getAbstractFileByPath(`${targetNoteName}.md`);
+		
+		if (abstractFile instanceof TFile) {
+			targetFile = abstractFile;
+		} else {
 			// Try finding by name if direct path doesn't work
 			const files = this.app.vault.getMarkdownFiles();
 			const found = files.find(f => f.basename === targetNoteName);
@@ -176,7 +191,14 @@ export default class PropertyRelationPlugin extends Plugin {
 				console.log(`Target note not found: ${targetNoteName}`);
 				return;
 			}
-			return this.removeFromTargetNote(sourceFile, found.basename, sourceProperty, targetProperty);
+			// Use the found file directly instead of recursing
+			targetFile = found;
+		}
+
+		// Safety check (should never happen due to logic above)
+		if (!targetFile) {
+			console.log(`Target file is null: ${targetNoteName}`);
+			return;
 		}
 
 		// Prevent processing the same file to avoid loops
@@ -188,8 +210,6 @@ export default class PropertyRelationPlugin extends Plugin {
 			this.processingFiles.add(targetFile.path);
 
 			const content = await this.app.vault.read(targetFile);
-			console.log(`[PropertyRelation] Removing "${sourceFile.basename}" from "${targetProperty}" in ${targetFile.path}`);
-			
 			const newContent = removeBidirectionalReference(
 				content,
 				sourceFile.basename,
@@ -197,16 +217,10 @@ export default class PropertyRelationPlugin extends Plugin {
 			);
 
 			if (newContent !== content) {
-				console.log(`[PropertyRelation] Content changed, updating ${targetFile.path}`);
 				await this.app.vault.modify(targetFile, newContent);
-			} else {
-				console.log(`[PropertyRelation] No changes needed for ${targetFile.path}`);
 			}
 		} catch (error) {
 			console.error(`[PropertyRelation] Error in removeFromTargetNote:`, error);
-			console.error(`[PropertyRelation] - sourceFile: ${sourceFile.path}`);
-			console.error(`[PropertyRelation] - targetFile: ${targetFile.path}`);
-			console.error(`[PropertyRelation] - sourceProperty: ${targetProperty}`);
 			new Notice(`Error removing property relation: ${error.message}`);
 		} finally {
 			this.processingFiles.delete(targetFile.path);
