@@ -105,7 +105,9 @@ export const removeBidirectionalReference = (
 				const existingValue = trimmed.substring(`${propertyName}:`.length).trim();
 				
 				if (existingValue) {
-					if (existingValue.includes(sourceReference)) {
+					// Check if value contains the reference (including partial matches for malformed YAML)
+					const sourceNoteNameFromRef = sourceReference.slice(2, -2); // Remove [[ and ]]
+					if (existingValue.includes(sourceReference) || existingValue.includes(sourceNoteNameFromRef)) {
 						propertyModified = true;
 						
 						// Check if it's a proper YAML array (starts with [ and ends with ] but not a wikilink)
@@ -113,45 +115,108 @@ export const removeBidirectionalReference = (
 							// Array format - remove the specific reference
 							const arrayContent = existingValue.slice(1, -1);
 							const items = arrayContent.split(',').map(item => item.trim().replace(/^"(.*)"$/, '$1'));
-							const filteredItems = items.filter(item => item !== sourceReference);
 							
-							if (filteredItems.length === 0) {
-								// Keep the property but make it an empty array
-								newLines.push(`${propertyName}: []`);
-							} else if (filteredItems.length === 1) {
+							// Filter out items that match the target reference (including partial matches for malformed YAML)
+							const filteredItems = items.filter(item => {
+								// Exact match
+								if (item === sourceReference) return false;
+								
+								// Check if this item contains the source note name (for malformed wikilinks)
+								if (item.includes(sourceNoteNameFromRef)) {
+									return false;
+								}
+								
+								return true;
+							});
+							
+							// Clean up any remaining items to fix broken wikilinks
+							const cleanedItems = filteredItems
+								.map(item => {
+									let cleanItem = item;
+									
+									// Remove any extraneous quotes that might be stuck to the content
+									cleanItem = cleanItem.replace(/^"+|"+$/g, ''); // Remove leading/trailing quotes
+									
+									// Fix broken wikilinks - if item looks like a partial wikilink, try to repair it
+									if (cleanItem.includes('[[') && !cleanItem.includes(']]')) {
+										// Missing closing ]]
+										cleanItem = cleanItem + ']]';
+									} else if (cleanItem.includes(']]') && !cleanItem.includes('[[')) {
+										// Missing opening [[
+										cleanItem = '[[' + cleanItem;
+									}
+									
+									return cleanItem;
+								})
+								.filter(item => item.trim() !== '' && item !== '""' && item !== '"'); // Remove empty or quote-only items
+
+							if (cleanedItems.length === 0) {
+								// Property becomes empty - remove it entirely (don't add it to newLines)
+								// This maintains backward compatibility with existing behavior
+							} else if (cleanedItems.length === 1) {
 								// Convert back to single value if only one item remains
-								newLines.push(`${propertyName}: "${filteredItems[0]}"`);
+								newLines.push(`${propertyName}: "${cleanedItems[0]}"`);
 							} else {
 								// Keep as array with remaining items
-								const newArrayValue = `[${filteredItems.map(item => `"${item}"`).join(', ')}]`;
+								const newArrayValue = `[${cleanedItems.map(item => `"${item}"`).join(', ')}]`;
 								newLines.push(`${propertyName}: ${newArrayValue}`);
 							}
 						} else if (existingValue === `"${sourceReference}"` || existingValue === sourceReference) {
-							// Single value that matches exactly - keep property but make it empty array
-							newLines.push(`${propertyName}: []`);
+							// Single value that matches exactly - remove property entirely
+							// (don't add it to newLines)
 						} else {
 							// Handle malformed YAML or mixed content - remove all instances of the wikilink
-							const originalValue = existingValue;
 							let newValue = existingValue;
 							
-							// Remove all instances of the wikilink (with and without quotes)
+							// Remove complete wikilinks (with and without quotes)
 							newValue = newValue.replace(new RegExp(`"?\\[\\[${sourceNoteName}\\]\\]"?`, 'g'), '');
 							
-							// Clean up the result
-							newValue = newValue
-								.replace(/\s+/g, ' ')  // Replace multiple spaces with single space
-								.replace(/^\s+|\s+$/g, '')  // Trim leading/trailing spaces
-								.replace(/^-\s*|-\s*$/g, '')  // Remove leading/trailing dashes
-								.replace(/\s*-\s*-\s*/g, ' ')  // Replace dash sequences with spaces
-								.replace(/^\s+|\s+$/g, '');  // Trim again
+							// Remove partial/broken wikilinks that might exist in malformed YAML
+							// This handles cases like: ""[[Note Name", "Other]]""
+							newValue = newValue.replace(new RegExp(`"?\\[\\[${sourceNoteName}"?`, 'g'), '');
+							newValue = newValue.replace(new RegExp(`"?${sourceNoteName}\\]\\]"?`, 'g'), '');
 							
-							// If the value becomes empty or contains only quotes/punctuation, make it empty array
-							if (!newValue || newValue.match(/^["'\s\-]*$/)) {
-								// Property becomes empty, keep it as empty array
-								newLines.push(`${propertyName}: []`);
+							// Clean up malformed array syntax
+							newValue = newValue
+								.replace(/\[\s*""\s*/g, '[')     // Remove leading double quotes in arrays
+								.replace(/\s*""\s*\]/g, ']')     // Remove trailing double quotes in arrays
+								.replace(/,\s*,/g, ',')          // Remove duplicate commas
+								.replace(/^\[,|,\]$/g, match => match.replace(',', ''))  // Remove leading/trailing commas
+								.replace(/\s+/g, ' ')            // Replace multiple spaces with single space
+								.replace(/^\s+|\s+$/g, '')       // Trim leading/trailing spaces
+								.replace(/^-\s*|-\s*$/g, '')     // Remove leading/trailing dashes
+								.replace(/\s*-\s*-\s*/g, ' ')    // Replace dash sequences with spaces
+								.replace(/^\s+|\s+$/g, '');      // Trim again
+							
+							// If the value becomes empty or contains only quotes/punctuation, remove property
+							if (!newValue || newValue.match(/^["'\s\-\[\],]*$/)) {
+								// Property becomes empty - remove it entirely (don't add to newLines)
 							} else {
-								// Keep the modified value
-								newLines.push(`${propertyName}: ${newValue}`);
+								// Try to fix remaining array structure if it looks like an array
+								if (newValue.startsWith('[') && newValue.endsWith(']')) {
+									const arrayContent = newValue.slice(1, -1).trim();
+									if (arrayContent) {
+										// Split by comma and clean up items
+										const items = arrayContent.split(',')
+											.map(item => item.trim())
+											.filter(item => item && item !== '""' && item !== '"')
+											.map(item => item.replace(/^"(.+)"$/, '$1')); // Remove quotes if they wrap the whole item
+										
+										if (items.length === 0) {
+											// Array becomes empty - remove property entirely
+										} else if (items.length === 1) {
+											newLines.push(`${propertyName}: "${items[0]}"`);
+										} else {
+											const cleanArray = `[${items.map(item => `"${item}"`).join(', ')}]`;
+											newLines.push(`${propertyName}: ${cleanArray}`);
+										}
+									} else {
+										// Array content is empty - remove property entirely
+									}
+								} else {
+									// Keep the modified value as-is
+									newLines.push(`${propertyName}: ${newValue}`);
+								}
 							}
 						}
 					} else {
